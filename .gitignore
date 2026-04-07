@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Database files
+data/*.db
+data/*.db-*
+
+# Logs
+logs/*.log
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# Distribution
+build/
+dist/
+*.egg-info/
+
+# Backup files
+backups/*.bak
+backups/*.backup

@@ -220,6 +220,19 @@ class RegressionTestingSkill:
 
         return triggered_runs
 
+    async def trigger_single_suite(self,
+                                 suite_id: str,
+                                 manifest: str,
+                                 cluster: Cluster = Cluster.USE1,
+                                 jira_key: str = None) -> TestRun:
+        """Trigger a single test suite (public method)"""
+        if suite_id not in self.test_suites:
+            raise ValueError(f"Unknown test suite: {suite_id}")
+
+        logger.info(f"Triggering single suite {suite_id} for {manifest} on {cluster.value}")
+
+        return await self._trigger_single_test(suite_id, manifest, cluster, jira_key)
+
     async def _trigger_single_test(self,
                                  suite_id: str,
                                  manifest: str,

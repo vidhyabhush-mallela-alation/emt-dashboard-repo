@@ -424,6 +424,122 @@ class EMTDashboard:
             logger.error(f"Failed to analyze test failures: {e}")
             return web.json_response({"error": str(e)}, status=500)
 
+    async def get_test_results(self, request):
+        """Get detailed test results"""
+        try:
+            test_id = request.match_info['test_id']
+
+            # Get test run from active runs or database
+            if test_id in self.active_test_runs:
+                test_run = self.active_test_runs[test_id]
+            else:
+                conn = sqlite3.connect(str(self.db_path))
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM test_runs WHERE id = ?", (test_id,))
+                row = cursor.fetchone()
+                conn.close()
+
+                if not row:
+                    return web.json_response({"error": "Test not found"}, status=404)
+
+                return web.json_response({
+                    "id": row[0],
+                    "suite_id": row[1],
+                    "build_number": row[2],
+                    "status": row[3],
+                    "cluster": row[4],
+                    "manifest": row[5],
+                    "started_at": row[6],
+                    "completed_at": row[7],
+                    "duration_seconds": row[8],
+                    "passed": row[9],
+                    "failed": row[10],
+                    "skipped": row[11],
+                    "total": row[12],
+                    "url": row[13],
+                    "failures": json.loads(row[14] or '[]')
+                })
+
+            return web.json_response({
+                "id": test_run.id,
+                "suite_id": test_run.suite_id,
+                "build_number": test_run.build_number,
+                "status": test_run.status.value,
+                "cluster": test_run.cluster.value,
+                "manifest": test_run.manifest,
+                "started_at": test_run.started_at.isoformat(),
+                "completed_at": test_run.completed_at.isoformat() if test_run.completed_at else None,
+                "duration_seconds": test_run.duration_seconds,
+                "passed": test_run.passed,
+                "failed": test_run.failed,
+                "skipped": test_run.skipped,
+                "total": test_run.total,
+                "url": test_run.url,
+                "failures": test_run.failures
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to get test results: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def trigger_single_test(self, request):
+        """Trigger a single test suite"""
+        try:
+            suite_id = request.match_info['suite_id']
+            data = await request.json()
+
+            manifest = data.get('manifest')
+            cluster_name = data.get('cluster', 'qa-enterprise-use1')
+            jira_key = data.get('jira_key')
+
+            if not manifest:
+                return web.json_response({"error": "manifest is required"}, status=400)
+
+            try:
+                cluster = Cluster(cluster_name)
+            except ValueError:
+                return web.json_response({"error": f"Invalid cluster: {cluster_name}"}, status=400)
+
+            # Trigger single test suite
+            test_run = await self.regression_skill.trigger_single_suite(
+                suite_id=suite_id,
+                manifest=manifest,
+                cluster=cluster,
+                jira_key=jira_key
+            )
+
+            # Store test run
+            await self._store_test_run(test_run)
+            self.active_test_runs[test_run.id] = test_run
+
+            # Add timeline event
+            await self._add_timeline_event(
+                "single_test_triggered",
+                f"Test suite {suite_id} triggered",
+                f"Manifest: {manifest[:50]}..., Cluster: {cluster_name}",
+                related_id=test_run.id,
+                metadata={
+                    "suite_id": suite_id,
+                    "manifest": manifest,
+                    "cluster": cluster_name,
+                    "jira_key": jira_key
+                }
+            )
+
+            return web.json_response({
+                "status": "triggered",
+                "test_run": {
+                    "id": test_run.id,
+                    "suite_id": test_run.suite_id,
+                    "url": test_run.url,
+                    "status": test_run.status.value
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to trigger single test: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
     # API Routes - Issue Analysis (Atlassian Context Enricher Skill)
 
     async def analyze_issue(self, request):
@@ -526,6 +642,60 @@ class EMTDashboard:
             logger.error(f"Failed to get analysis report: {e}")
             return web.json_response({"error": str(e)}, status=500)
 
+    async def analyze_issue_correlation(self, request):
+        """Analyze correlation between multiple issues"""
+        try:
+            data = await request.json()
+            issue_keys = data.get('issue_keys', [])
+            analysis_scope = data.get('analysis_scope', 'customer_impact')
+
+            if not issue_keys or len(issue_keys) < 2:
+                return web.json_response({"error": "At least 2 issue keys required"}, status=400)
+
+            # Execute correlation analysis using Atlassian skill
+            correlation_analysis = await self.atlassian_skill.analyze_issue_correlation(
+                issue_keys=issue_keys,
+                analysis_scope=analysis_scope
+            )
+
+            return web.json_response({
+                "correlation_id": f"corr_{int(datetime.now().timestamp())}",
+                "issue_keys": issue_keys,
+                "analysis_scope": analysis_scope,
+                "correlation_strength": correlation_analysis.get("strength", 0.0),
+                "common_patterns": correlation_analysis.get("patterns", []),
+                "shared_components": correlation_analysis.get("components", []),
+                "recommendations": correlation_analysis.get("recommendations", [])
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to analyze issue correlation: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def get_pattern_analysis(self, request):
+        """Get pattern analysis from historical data"""
+        try:
+            timeframe = request.query.get('timeframe', '30d')
+            pattern_type = request.query.get('type', 'all')
+
+            # Get pattern analysis using Atlassian skill
+            patterns = await self.atlassian_skill.analyze_historical_patterns(
+                timeframe=timeframe,
+                pattern_type=pattern_type
+            )
+
+            return web.json_response({
+                "timeframe": timeframe,
+                "pattern_type": pattern_type,
+                "patterns_found": len(patterns),
+                "patterns": patterns,
+                "generated_at": datetime.now().isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to get pattern analysis: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
     # Integrated Workflows
 
     async def full_emt_analysis(self, request):
@@ -599,6 +769,89 @@ class EMTDashboard:
         except Exception as e:
             logger.error(f"Failed to execute full EMT analysis: {e}")
             return web.json_response({"error": str(e)}, status=500)
+
+    async def get_emt_summary(self, request):
+        """Get summary of EMT ticket analysis and testing"""
+        try:
+            ticket_id = request.match_info['ticket_id']
+
+            # Find analyses for this ticket
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.cursor()
+
+            # Get issue analyses
+            cursor.execute("""
+                SELECT * FROM issue_analyses
+                WHERE issue_key = ?
+                ORDER BY created_at DESC
+            """, (ticket_id,))
+
+            analyses = []
+            for row in cursor.fetchall():
+                analyses.append({
+                    "id": row[0],
+                    "confidence_score": row[9],
+                    "issue_type": row[2],
+                    "customer_impact": row[4],
+                    "created_at": row[11]
+                })
+
+            # Get test runs
+            cursor.execute("""
+                SELECT * FROM test_runs
+                WHERE manifest LIKE ?
+                ORDER BY started_at DESC
+            """, (f"%{ticket_id}%",))
+
+            test_runs = []
+            for row in cursor.fetchall():
+                test_runs.append({
+                    "id": row[0],
+                    "suite_id": row[1],
+                    "status": row[3],
+                    "passed": row[9],
+                    "failed": row[10],
+                    "total": row[12],
+                    "started_at": row[6]
+                })
+
+            conn.close()
+
+            summary = {
+                "ticket_id": ticket_id,
+                "analyses_count": len(analyses),
+                "test_runs_count": len(test_runs),
+                "latest_analysis": analyses[0] if analyses else None,
+                "recent_test_runs": test_runs[:5],  # Last 5 test runs
+                "overall_status": self._calculate_emt_status(analyses, test_runs),
+                "generated_at": datetime.now().isoformat()
+            }
+
+            return web.json_response(summary)
+
+        except Exception as e:
+            logger.error(f"Failed to get EMT summary: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    def _calculate_emt_status(self, analyses, test_runs):
+        """Calculate overall EMT ticket status"""
+        if not analyses and not test_runs:
+            return "no_data"
+
+        # Check latest analysis confidence
+        latest_analysis = analyses[0] if analyses else None
+        high_confidence = latest_analysis and latest_analysis["confidence_score"] > 0.8
+
+        # Check test results
+        recent_tests = test_runs[:3] if test_runs else []
+        tests_passing = all(run["failed"] == 0 for run in recent_tests if run["total"] > 0)
+
+        if high_confidence and tests_passing:
+            return "resolved"
+        elif high_confidence or tests_passing:
+            return "in_progress"
+        else:
+            return "investigating"
 
     # WebSocket Handler
 

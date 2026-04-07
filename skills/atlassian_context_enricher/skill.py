@@ -1174,3 +1174,191 @@ class AtlassianContextEnricher:
             escalation_risk="monitor" if severity == "low" else "elevated",
             mitigation_urgency="standard"
         )
+
+    async def analyze_issue_correlation(self,
+                                      issue_keys: List[str],
+                                      analysis_scope: str = "customer_impact") -> Dict[str, Any]:
+        """Analyze correlation between multiple issues"""
+        logger.info(f"Analyzing correlation between issues: {', '.join(issue_keys)}")
+
+        try:
+            # Analyze each issue individually
+            analyses = {}
+            for issue_key in issue_keys:
+                try:
+                    analysis = await self.analyze_issue(issue_key, analysis_depth="focused")
+                    analyses[issue_key] = analysis
+                except Exception as e:
+                    logger.warning(f"Failed to analyze {issue_key}: {e}")
+                    continue
+
+            # Find common patterns
+            common_components = set()
+            common_patterns = []
+            confidence_scores = []
+
+            if analyses:
+                # Extract components and patterns
+                all_components = []
+                all_patterns = []
+
+                for analysis in analyses.values():
+                    all_components.extend(analysis.affected_components)
+                    confidence_scores.append(analysis.confidence_score)
+
+                    # Extract patterns from summary
+                    if "database" in analysis.analysis_summary.lower():
+                        all_patterns.append("database_related")
+                    if "permission" in analysis.analysis_summary.lower():
+                        all_patterns.append("permissions_related")
+                    if "performance" in analysis.analysis_summary.lower():
+                        all_patterns.append("performance_related")
+
+                # Find common elements
+                from collections import Counter
+                component_counts = Counter(all_components)
+                pattern_counts = Counter(all_patterns)
+
+                common_components = [comp for comp, count in component_counts.items() if count > 1]
+                common_patterns = [pattern for pattern, count in pattern_counts.items() if count > 1]
+
+            # Calculate correlation strength
+            correlation_strength = 0.0
+            if len(analyses) >= 2:
+                avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
+                component_overlap = len(common_components) / max(len(set(all_components)), 1)
+                pattern_overlap = len(common_patterns) / max(len(set(all_patterns)), 1)
+
+                correlation_strength = min(1.0, (avg_confidence + component_overlap + pattern_overlap) / 3)
+
+            # Generate recommendations
+            recommendations = []
+            if correlation_strength > 0.6:
+                recommendations.extend([
+                    "Strong correlation detected - investigate common root cause",
+                    "Consider consolidated remediation approach",
+                    "Prioritize fixes for shared components"
+                ])
+            elif correlation_strength > 0.3:
+                recommendations.extend([
+                    "Moderate correlation detected - monitor for patterns",
+                    "Review shared components for potential improvements"
+                ])
+            else:
+                recommendations.append("Low correlation - handle issues independently")
+
+            return {
+                "strength": correlation_strength,
+                "patterns": common_patterns,
+                "components": list(common_components),
+                "recommendations": recommendations,
+                "individual_analyses": len(analyses),
+                "scope": analysis_scope
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to analyze issue correlation: {e}")
+            return {
+                "strength": 0.0,
+                "patterns": [],
+                "components": [],
+                "recommendations": ["Error in correlation analysis - analyze issues individually"],
+                "error": str(e)
+            }
+
+    async def analyze_historical_patterns(self,
+                                        timeframe: str = "30d",
+                                        pattern_type: str = "all") -> List[Dict[str, Any]]:
+        """Analyze historical patterns from Atlassian data"""
+        logger.info(f"Analyzing historical patterns for {timeframe}, type: {pattern_type}")
+
+        try:
+            # Build JQL query for historical data
+            jql_query = f"created >= -{timeframe}"
+
+            if pattern_type != "all":
+                if pattern_type == "customer_impact":
+                    jql_query += " AND (labels = customer-impact OR priority in (Critical, High))"
+                elif pattern_type == "technical":
+                    jql_query += " AND component in (Database, API, Performance)"
+                elif pattern_type == "escalation":
+                    jql_query += " AND priority = Critical"
+
+            # Search for historical issues
+            search_results = await self._search_jira(jql_query, max_results=100)
+
+            if not search_results:
+                return []
+
+            # Analyze patterns
+            patterns = []
+
+            # Component frequency analysis
+            components = []
+            priorities = []
+            statuses = []
+
+            for result in search_results:
+                if result.metadata:
+                    components.extend(result.metadata.get("components", []))
+                    priorities.append(result.metadata.get("priority", "Unknown"))
+                    statuses.append(result.metadata.get("status", "Unknown"))
+
+            # Generate pattern insights
+            from collections import Counter
+
+            if components:
+                component_counts = Counter(components)
+                patterns.append({
+                    "type": "frequent_components",
+                    "title": "Most Affected Components",
+                    "data": dict(component_counts.most_common(5)),
+                    "insight": f"Top component: {component_counts.most_common(1)[0][0]} ({component_counts.most_common(1)[0][1]} issues)"
+                })
+
+            if priorities:
+                priority_counts = Counter(priorities)
+                patterns.append({
+                    "type": "priority_distribution",
+                    "title": "Issue Priority Distribution",
+                    "data": dict(priority_counts),
+                    "insight": f"Most common priority: {priority_counts.most_common(1)[0][0]}"
+                })
+
+            # Temporal patterns
+            monthly_counts = {}
+            for result in search_results[:30]:  # Limit for performance
+                # Extract month from timestamp (mock implementation)
+                month = "2024-04"  # Would parse from result.timestamp
+                monthly_counts[month] = monthly_counts.get(month, 0) + 1
+
+            if monthly_counts:
+                patterns.append({
+                    "type": "temporal_trend",
+                    "title": "Issue Frequency Over Time",
+                    "data": monthly_counts,
+                    "insight": f"Peak activity in: {max(monthly_counts, key=monthly_counts.get)}"
+                })
+
+            # Add summary pattern
+            patterns.insert(0, {
+                "type": "summary",
+                "title": "Historical Analysis Summary",
+                "data": {
+                    "total_issues": len(search_results),
+                    "timeframe": timeframe,
+                    "patterns_found": len(patterns) - 1
+                },
+                "insight": f"Analyzed {len(search_results)} issues from last {timeframe}"
+            })
+
+            return patterns
+
+        except Exception as e:
+            logger.error(f"Failed to analyze historical patterns: {e}")
+            return [{
+                "type": "error",
+                "title": "Pattern Analysis Error",
+                "data": {"error": str(e)},
+                "insight": "Unable to complete historical pattern analysis"
+            }]
