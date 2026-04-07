@@ -1,0 +1,165 @@
+# Regression Testing Skill Configuration
+# Configuration for Alation lineage certification test suites
+
+# Available clusters for test execution
+clusters:
+  - name: "qa-enterprise-use1"
+    description: "Primary QA cluster US East"
+    jenkins_url: "https://jenkins.alation-labs.com"
+    default: true
+
+  - name: "qa-enterprise-use2"
+    description: "Secondary QA cluster US East"
+    jenkins_url: "https://jenkins.alation-labs.com"
+
+  - name: "qa-enterprise-usw2"
+    description: "QA cluster US West"
+    jenkins_url: "https://jenkins.alation-labs.com"
+
+  - name: "development-enterprise-use1"
+    description: "Development cluster"
+    jenkins_url: "https://jenkins.alation-labs.com"
+
+# Test suite configurations
+test_suites:
+  selenium_qli:
+    name: "Selenium QLI"
+    job_path: "alation_selenium/master/test_selenium_zeus"
+    expected_tests: 4
+    timeout_minutes: 120
+    framework: "selenium"
+    description: "Selenium-based Query Log Ingestion tests using Gauge framework"
+    parameters:
+      GAUGE_SPEC_TAG_PARAM: "qli"
+      BROWSER_NAME_PARAM: "Chrome(Headless)"
+      FEATURE_FLAGS_TYPE_PARAM: "flags_on"
+      USE_SHARED_RDS: true
+      RETRY_FAILED_JOB: true
+      RETRY_FAILED_TESTS: true
+      RUN_DATA_SETUP_PARAM: "True"
+
+  tavern_static_ds:
+    name: "Tavern Static DS"
+    job_path: "datasources/master/datasources_test_tavernapi/tavernapi_test_zeus/test_release_zeus_api_multiple_static_ds"
+    expected_tests: 42
+    timeout_minutes: 180
+    framework: "tavern"
+    description: "Tavern API tests for static datasources (BigQuery, Snowflake, Virtual)"
+    parameters:
+      DB_TYPE: "bigquery,snowflake,virtual"
+      API_TEST_TAVERN_MARKS_PARAM: "lineage_squad_certification"
+      PID1_DEPLOYMENT: true
+      ALATION_FEATURE_FLAG_NAMES_API_PARAM: "lineage-service.enabled,alation.feature_flags.enable_manual_lineage_curation"
+
+  tavern_provisioned_ds:
+    name: "Tavern Provisioned DS"
+    job_path: "datasources/master/datasources_test_tavernapi/tavernapi_test_zeus/test_release_zeus_api_multiple_ds"
+    expected_tests: 6
+    timeout_minutes: 200
+    framework: "tavern"
+    description: "Tavern API tests for provisioned datasources (Oracle, Postgres, Redshift, SQL Server)"
+    parameters:
+      DB_TYPE: "oracleec2,postgresec2,redshift,sqlserverec2"
+      API_TEST_TAVERN_MARKS_PARAM: "lineage_squad_certification"
+      PID1_DEPLOYMENT: true
+      ALATION_FEATURE_FLAG_NAMES_API_PARAM: "lineage-service.enabled,alation.feature_flags.enable_manual_lineage_curation"
+
+  playwright_snowflake:
+    name: "Playwright Snowflake"
+    job_path: "datasources/master/playwright_connector/zeus/test_release_zeus_static_ds"
+    expected_tests: 127
+    timeout_minutes: 180
+    framework: "playwright"
+    description: "Playwright connector tests for Snowflake static datasource"
+    parameters:
+      ALATION_UI_BRANCH: "main"
+      SQUAD_NAME: "lineage"
+      DB_TYPE: "snowflake"
+      TAG: "lineage_squad_certification"
+      CONNECTOR_TEST_TYPE: "ocf-selenium"
+      ALATION_FEATURE_FLAG_NAMES_SELENIUM_PARAM: "lineage-service.enabled,alation.feature_flags.enable_manual_lineage_curation"
+
+  playwright_databricks:
+    name: "Playwright Databricks"
+    job_path: "datasources/master/playwright_connector/zeus/test_release_zeus"
+    expected_tests: 29
+    timeout_minutes: 160
+    framework: "playwright"
+    description: "Playwright connector tests for Databricks Unity provisioned datasource"
+    parameters:
+      ALATION_UI_BRANCH: "main"
+      SQUAD_NAME: "lineage"
+      DB_TYPE: "databricks_unity"
+      TAG: "lineage_squad_certification"
+      CONNECTOR_TEST_TYPE: "ocf-selenium"
+      ALATION_FEATURE_FLAG_NAMES_SELENIUM_PARAM: "lineage-service.enabled,alation.feature_flags.enable_manual_lineage_curation"
+
+  github_actions_e2e:
+    name: "GitHub Actions E2E"
+    job_path: "Alation/alation-ui"
+    workflow: "e2e-with-tenant-provisoning.yaml"
+    expected_tests: 8
+    timeout_minutes: 90
+    framework: "github_actions"
+    description: "GitHub Actions E2E tests with tenant provisioning"
+    parameters:
+      PLAYWRIGHT_TAGS_PARAM: "@lineage_squad_certification"
+      TENANT_TYPE: "enterprise"
+      DESTROY_TENANT_AFTER_TESTS: true
+      ENABLE_E2E_RETRY: true
+      ENABLE_AA_SNOWFLAKE_BI: false
+      GREP_INVERT: ""
+      USE_SHARED_AIRFLOW_DAG: false
+
+# Failure analysis patterns
+failure_patterns:
+  ui_timeout:
+    keywords: ["timeout", "lineage", "zoom", "ui", "frontend"]
+    severity: "high"
+    description: "UI performance issues affecting lineage visualization"
+
+  sql_server_mde:
+    keywords: ["partial_success", "sql", "mde", "status"]
+    severity: "medium"
+    description: "SQL Server MDE status reporting inconsistencies"
+
+  infrastructure:
+    keywords: ["jenkins", "cluster", "deployment", "infrastructure"]
+    severity: "critical"
+    description: "Infrastructure or build system failures"
+
+  connector_issue:
+    keywords: ["connector", "connection", "metadata", "extraction"]
+    severity: "high"
+    description: "Connector reliability or metadata extraction issues"
+
+# Monitoring settings
+monitoring:
+  update_interval_seconds: 120
+  max_concurrent_runs: 10
+  retention_days: 30
+
+  alerts:
+    failure_rate_threshold: 0.2  # 20%
+    response_time_threshold: 300  # 5 minutes
+
+  notifications:
+    slack_enabled: false
+    email_enabled: false
+    webhook_enabled: true
+
+# MCP integration settings
+mcp:
+  jenkins_tools:
+    - "mcp__jenkins__triggerBuild"
+    - "mcp__jenkins__getBuild"
+    - "mcp__jenkins__getTestResults"
+    - "mcp__jenkins__getQueueItem"
+    - "mcp__jenkins__searchBuildLog"
+
+  github_tools:
+    - "gh_run_view"
+    - "gh_workflow_run"
+
+  timeout_seconds: 300
+  retry_attempts: 3

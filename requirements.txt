@@ -1,0 +1,49 @@
+# EMT Dashboard - Claude Skills Integration
+# Core web framework and async support
+aiohttp==3.9.3
+aiofiles==23.2.1
+aiohttp-cors==0.7.0
+
+# Database and data handling
+sqlite3  # Built-in Python module
+pandas==2.2.0
+numpy==1.26.3
+
+# HTTP client and API integration
+httpx==0.26.0
+requests==2.31.0
+
+# WebSocket support
+websockets==12.0
+
+# Configuration and environment
+python-dotenv==1.0.1
+pyyaml==6.0.1
+
+# Logging and monitoring
+structlog==24.1.0
+prometheus-client==0.19.0
+
+# Date/time handling
+python-dateutil==2.8.2
+
+# Development dependencies (install with pip install -r requirements-dev.txt)
+# pytest==8.0.0
+# pytest-asyncio==0.23.4
+# black==24.1.1
+# flake8==7.0.0
+# mypy==1.8.0
+# pre-commit==3.6.0
+
+# Optional: Atlassian SDK (if using real Atlassian integration)
+# jira==3.5.2
+# atlassian-python-api==3.41.5
+
+# Optional: GitHub integration
+# PyGithub==2.2.0
+
+# Optional: Jenkins integration (if not using MCP)
+# python-jenkins==1.8.2
+
+# Optional: Slack integration
+# slack-sdk==3.26.2

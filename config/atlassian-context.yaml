@@ -1,0 +1,256 @@
+# Atlassian Context Enricher Skill Configuration
+# Configuration for systematic multi-dimensional analysis framework
+
+# Atlassian connection settings
+atlassian:
+  jira:
+    base_url: "https://alationcorp.atlassian.net"
+    api_version: "2"
+    max_results_per_query: 50
+    timeout_seconds: 30
+
+  confluence:
+    base_url: "https://alationcorp.atlassian.net/wiki"
+    api_version: "latest"
+    max_results_per_query: 25
+    timeout_seconds: 30
+
+# 7-Dimensional Analysis Framework Configuration
+analysis_framework:
+  phase_1_technical_expansion:
+    description: "Technical term expansion and component identification"
+    minimum_searches: 8
+    search_patterns:
+      - "core_issue_search"
+      - "component_expansion"
+      - "error_pattern_analysis"
+      - "database_connector_correlation"
+      - "alation_service_mapping"
+      - "customer_symptom_analysis"
+      - "technical_architecture_search"
+      - "confluence_documentation_review"
+
+  phase_2_cross_platform:
+    description: "Cross-platform deep dive across Jira and Confluence"
+    minimum_searches: 12
+    mandatory_platforms: ["jira", "confluence"]
+    jira_searches:
+      - "component_label_analysis"
+      - "workflow_pattern_identification"
+      - "cross_reference_mapping"
+      - "version_correlation_analysis"
+      - "priority_severity_trends"
+      - "assignment_expertise_patterns"
+    confluence_searches:
+      - "team_documentation_runbooks"
+      - "architecture_design_decisions"
+      - "meeting_records_planning"
+      - "customer_communication_support"
+      - "standards_best_practices"
+      - "incident_history_resolutions"
+
+  phase_3_temporal:
+    description: "Temporal pattern analysis and timeline correlation"
+    minimum_searches: 6
+    time_windows:
+      - name: "recent_surge"
+        range: "30d"
+      - name: "weekly_context"
+        range: "7d"
+      - name: "historical_patterns"
+        range: "90d"
+
+  phase_4_people_network:
+    description: "Expertise and ownership mapping"
+    minimum_searches: 4
+    focus_areas:
+      - "domain_experts_identification"
+      - "team_ownership_patterns"
+      - "escalation_path_mapping"
+      - "confluence_expertise_documentation"
+
+  phase_5_customer_impact:
+    description: "Business impact and escalation analysis"
+    minimum_searches: 6
+    impact_indicators:
+      - "customer_escalation_patterns"
+      - "business_critical_markers"
+      - "revenue_impact_assessment"
+      - "user_experience_degradation"
+      - "sla_breach_indicators"
+      - "priority_escalation_trends"
+
+  phase_6_system_layers:
+    description: "Architectural dependency mapping"
+    minimum_searches: 10
+    system_layers:
+      - "adjacent_systems_integration"
+      - "data_layer_dependencies"
+      - "api_interface_correlations"
+      - "infrastructure_platform_analysis"
+      - "ui_frontend_connections"
+      - "service_mesh_interactions"
+
+  phase_7_pattern_recognition:
+    description: "Cross-domain systemic analysis"
+    minimum_searches: 12
+    pattern_categories:
+      - "cross_technology_patterns"
+      - "cross_team_correlations"
+      - "cross_environment_analysis"
+      - "vendor_third_party_patterns"
+
+# Alation-specific search configurations
+alation_knowledge:
+  components:
+    - "lineage-service"
+    - "alation-analytics"
+    - "connectors"
+    - "query-log-ingestion"
+    - "metadata-extraction"
+    - "data-catalog"
+    - "stewardship"
+    - "governance"
+    - "compose"
+    - "articles"
+    - "lexicon"
+    - "dashboards"
+    - "reports"
+
+  databases:
+    - "snowflake"
+    - "databricks"
+    - "bigquery"
+    - "redshift"
+    - "postgresql"
+    - "mysql"
+    - "oracle"
+    - "sql-server"
+    - "athena"
+    - "presto"
+    - "hive"
+    - "teradata"
+
+  customer_indicators:
+    - "customer-escalation"
+    - "support-escalation"
+    - "production-issue"
+    - "customer-impact"
+    - "sev-1"
+    - "sev-2"
+    - "critical"
+    - "urgent"
+
+# Issue classification rules
+issue_classification:
+  customer_escalation:
+    keywords: ["customer-escalation", "sev-1", "critical-customer", "support-escalation"]
+    priority_boost: true
+    analysis_depth: "comprehensive"
+
+  performance_issue:
+    keywords: ["timeout", "slow", "performance", "latency", "hang", "response-time"]
+    focus_areas: ["system_layers", "temporal"]
+
+  connector_problem:
+    keywords: ["connector", "metadata", "extraction", "sync", "ingestion"]
+    database_correlation: true
+    focus_areas: ["technical_expansion", "system_layers"]
+
+  data_quality:
+    keywords: ["data-quality", "metadata", "lineage", "profiling", "accuracy"]
+    focus_areas: ["customer_impact", "system_layers"]
+
+  integration_failure:
+    keywords: ["api", "integration", "sync", "webhook", "interface"]
+    focus_areas: ["system_layers", "pattern_recognition"]
+
+# Search optimization settings
+search_optimization:
+  jql_templates:
+    basic_issue_search: 'text ~ "{term}" AND project in (AL, EMT, SUPPORT)'
+    component_search: 'component = "{component}" AND text ~ "customer"'
+    temporal_search: 'created >= "{start_date}" AND created <= "{end_date}" AND text ~ "{term}"'
+    priority_search: 'priority >= High AND text ~ "{term}"'
+    escalation_search: 'labels in (customer-escalation) AND text ~ "{term}"'
+    team_search: 'assignee in membersOf("{team}") AND text ~ "{term}"'
+
+  confluence_templates:
+    documentation_search: '"{term}" AND type = page'
+    team_space_search: 'space = "{space}" AND "{term}"'
+    architecture_search: '"{term}" architecture OR "{term}" design'
+    runbook_search: '"{term}" troubleshooting OR "{term}" runbook'
+
+  result_filtering:
+    max_age_days: 365
+    min_relevance_score: 0.3
+    exclude_patterns:
+      - "spam"
+      - "test-automation-only"
+      - "deprecated"
+
+# Analysis quality controls
+quality_controls:
+  minimum_total_searches: 58
+  minimum_results_threshold: 10
+  confidence_calculation:
+    search_completeness_weight: 0.4
+    result_quality_weight: 0.3
+    phase_coverage_weight: 0.3
+
+  validation_rules:
+    - "all_phases_completed"
+    - "minimum_search_counts_met"
+    - "both_platforms_searched"
+    - "temporal_coverage_adequate"
+
+# Output formatting
+output_formatting:
+  summary_max_length: 2000
+  findings_per_phase: 5
+  patterns_per_phase: 3
+  recommendations_limit: 8
+
+  report_sections:
+    - "executive_summary"
+    - "confidence_assessment"
+    - "phase_by_phase_analysis"
+    - "systemic_patterns"
+    - "actionable_recommendations"
+    - "related_issues_mapping"
+    - "team_expertise_guidance"
+
+# Integration settings
+integrations:
+  slack:
+    enabled: false
+    notification_channel: "#engineering-alerts"
+    mention_on_critical: true
+
+  email:
+    enabled: false
+    recipients: ["oncall@alation.com"]
+
+  webhook:
+    enabled: true
+    url_template: "https://internal.alation.com/hooks/issue-analysis"
+
+  jira_comments:
+    auto_update: false
+    template: "analysis_summary_template"
+
+# Monitoring and metrics
+monitoring:
+  track_analysis_performance: true
+  log_search_patterns: true
+  measure_confidence_accuracy: true
+
+  performance_thresholds:
+    max_analysis_duration: 300  # 5 minutes
+    max_search_duration: 30     # 30 seconds per search
+    min_confidence_threshold: 0.7
+
+  alerts:
+    low_confidence_analysis: true
+    analysis_timeout: true
+    search_api_failures: true

@@ -1,0 +1,175 @@
+# EMT Dashboard Configuration
+# Main configuration for Claude-powered EMT dashboard
+
+# Application settings
+app:
+  name: "EMT Dashboard"
+  version: "1.0.0"
+  description: "Claude-powered EMT ticket intelligence dashboard"
+
+  server:
+    host: "0.0.0.0"
+    port: 8080
+    debug: false
+
+  database:
+    type: "sqlite"
+    path: "data/dashboard.db"
+    backup_interval_hours: 24
+
+  logging:
+    level: "INFO"
+    file: "logs/dashboard.log"
+    max_size_mb: 100
+    backup_count: 5
+
+# Skills configuration
+skills:
+  regression_testing:
+    enabled: true
+    config_file: "config/regression-testing.yaml"
+    auto_monitor: true
+    update_interval_seconds: 120
+
+  atlassian_context_enricher:
+    enabled: true
+    config_file: "config/atlassian-context.yaml"
+    auto_analyze_escalations: true
+    confidence_threshold: 0.7
+
+# Claude MCP integration
+claude_mcp:
+  server_url: "localhost:3001"
+  timeout_seconds: 300
+  retry_attempts: 3
+
+  tools:
+    jenkins:
+      - "mcp__jenkins__triggerBuild"
+      - "mcp__jenkins__getBuild"
+      - "mcp__jenkins__getTestResults"
+      - "mcp__jenkins__getQueueItem"
+      - "mcp__jenkins__searchBuildLog"
+
+    github:
+      - "gh_run_view"
+      - "gh_workflow_run"
+      - "gh_run_list"
+
+# External integrations
+integrations:
+  jenkins:
+    base_url: "https://jenkins.alation-labs.com"
+    use_mcp: true
+    fallback_api: true
+
+  atlassian:
+    jira_url: "https://alationcorp.atlassian.net"
+    confluence_url: "https://alationcorp.atlassian.net/wiki"
+    use_mcp: false
+    direct_api: true
+
+  github:
+    base_url: "https://api.github.com"
+    use_cli: true
+
+  slack:
+    enabled: false
+    webhook_url: ""
+    channels:
+      alerts: "#engineering-alerts"
+      updates: "#emt-updates"
+
+# Dashboard UI settings
+ui:
+  theme: "alation"
+  auto_refresh_seconds: 30
+  websocket_enabled: true
+
+  features:
+    real_time_updates: true
+    failure_analysis: true
+    issue_correlation: true
+    test_retriggering: true
+    timeline_visualization: true
+
+  charts:
+    enabled: true
+    library: "chart.js"
+    default_timerange: "7d"
+
+# Security settings
+security:
+  cors_origins: ["*"]
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 100
+
+  authentication:
+    required: false
+    method: "none"  # none, basic, oauth, jwt
+
+# Monitoring and observability
+monitoring:
+  metrics:
+    enabled: true
+    endpoint: "/metrics"
+    prometheus_compatible: true
+
+  health_checks:
+    interval_seconds: 30
+    endpoints:
+      - "/health"
+      - "/health/detailed"
+
+  tracing:
+    enabled: false
+    jaeger_endpoint: ""
+
+# Data retention and cleanup
+data_management:
+  retention:
+    test_runs_days: 90
+    analyses_days: 180
+    timeline_events_days: 365
+
+  cleanup:
+    auto_cleanup: true
+    cleanup_interval_hours: 24
+
+  backup:
+    enabled: true
+    interval_hours: 6
+    retention_count: 10
+    location: "backups/"
+
+# Performance settings
+performance:
+  database:
+    connection_pool_size: 5
+    query_timeout_seconds: 30
+
+  websockets:
+    max_connections: 100
+    ping_interval_seconds: 30
+
+  caching:
+    enabled: true
+    ttl_seconds: 300
+    max_size_mb: 100
+
+# Feature flags
+features:
+  skill_auto_execution: true
+  advanced_analytics: true
+  pattern_detection: true
+  correlation_analysis: true
+  predictive_insights: false  # Future feature
+  ml_recommendations: false   # Future feature
+
+# Development settings
+development:
+  hot_reload: true
+  debug_logging: true
+  mock_external_apis: false
+  sample_data: false
