@@ -5,7 +5,7 @@ aiofiles==23.2.1
 aiohttp-cors==0.7.0
 
 # Database and data handling
-sqlite3  # Built-in Python module
+# sqlite3 - Built-in Python module, no install needed
 pandas==2.2.0
 numpy==1.26.3
 
