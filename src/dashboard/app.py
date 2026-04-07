@@ -24,6 +24,11 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from skills.regression_testing.skill import RegressionTestingSkill, TestRun, TestStatus, Cluster
 from skills.atlassian_context_enricher.skill import AtlassianContextEnricher, IssueAnalysis
 
+# Import image analysis modules
+from release_notes_from_image_tags.extractor import ImageReleaseExtractor, ImageMetadata
+from release_notes_from_image_tags.analyzer import ReleaseAnalyzer, RiskAssessment, DeploymentRecommendation
+from release_notes_from_image_tags.validator import ImageValidator, ImageValidationReport
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -49,9 +54,15 @@ class EMTDashboard:
         self.regression_skill = RegressionTestingSkill()
         self.atlassian_skill = AtlassianContextEnricher()
 
-        # Active test runs and analyses
+        # Initialize image analysis components
+        self.image_extractor = ImageReleaseExtractor()
+        self.release_analyzer = ReleaseAnalyzer()
+        self.image_validator = ImageValidator()
+
+        # Active test runs, analyses, and image validations
         self.active_test_runs: Dict[str, TestRun] = {}
         self.active_analyses: Dict[str, IssueAnalysis] = {}
+        self.active_image_analyses: Dict[str, Dict[str, Any]] = {}
 
         # Setup application
         self.setup_routes()
@@ -96,6 +107,13 @@ class EMTDashboard:
         # Integrated workflows
         self.app.router.add_post(f'{api_v1}/emt/{{ticket_id}}/full-analysis', self.full_emt_analysis)
         self.app.router.add_get(f'{api_v1}/emt/{{ticket_id}}/summary', self.get_emt_summary)
+
+        # Image analysis (QLI & Parser Image Management)
+        self.app.router.add_post(f'{api_v1}/images/analyze', self.analyze_image_tag)
+        self.app.router.add_post(f'{api_v1}/images/validate', self.validate_image)
+        self.app.router.add_post(f'{api_v1}/images/deployment-recommendation', self.get_deployment_recommendation)
+        self.app.router.add_get(f'{api_v1}/images/{{analysis_id}}/report', self.get_image_analysis_report)
+        self.app.router.add_post(f'{api_v1}/images/deploy', self.deploy_image_with_tests)
 
         # WebSocket for real-time updates
         self.app.router.add_get('/ws', self.websocket_handler)
@@ -163,6 +181,42 @@ class EMTDashboard:
                 description TEXT,
                 related_id TEXT,
                 metadata TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Image analyses table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS image_analyses (
+                id TEXT PRIMARY KEY,
+                image_tag TEXT NOT NULL,
+                image_type TEXT NOT NULL,
+                version TEXT NOT NULL,
+                build_number TEXT,
+                commit_hash TEXT,
+                jira_tickets TEXT DEFAULT '[]',
+                release_notes TEXT DEFAULT '[]',
+                risk_level TEXT NOT NULL,
+                risk_factors TEXT DEFAULT '[]',
+                recommendations TEXT DEFAULT '[]',
+                deployment_ready BOOLEAN DEFAULT FALSE,
+                validation_status TEXT NOT NULL,
+                blocking_issues TEXT DEFAULT '[]',
+                confidence_score REAL DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Image validation results table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS image_validations (
+                id TEXT PRIMARY KEY,
+                image_tag TEXT NOT NULL,
+                validation_type TEXT NOT NULL,
+                is_valid BOOLEAN NOT NULL,
+                message TEXT NOT NULL,
+                details TEXT DEFAULT '{}',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -835,7 +889,7 @@ class EMTDashboard:
 
     def _calculate_emt_status(self, analyses, test_runs):
         """Calculate overall EMT ticket status"""
-        if not analyses and not test_runs:
+        if not analyses and test_runs:
             return "no_data"
 
         # Check latest analysis confidence
@@ -852,6 +906,332 @@ class EMTDashboard:
             return "in_progress"
         else:
             return "investigating"
+
+    # API Routes - Image Analysis (QLI & Parser Image Management)
+
+    async def analyze_image_tag(self, request):
+        """Analyze image tag and extract metadata"""
+        try:
+            data = await request.json()
+            image_tag = data.get('image_tag')
+            enrich_metadata = data.get('enrich_metadata', True)
+
+            if not image_tag:
+                return web.json_response({"error": "image_tag is required"}, status=400)
+
+            # Parse image tag
+            metadata = self.image_extractor.parse_image_tag(image_tag)
+
+            # Enrich metadata if requested
+            if enrich_metadata:
+                metadata = await self.image_extractor.enrich_metadata(metadata)
+
+            # Generate test matrix
+            test_matrix = self.image_extractor.generate_test_matrix(metadata)
+
+            # Store analysis
+            analysis_id = f"img_analysis_{metadata.image_type}_{int(datetime.now().timestamp())}"
+            self.active_image_analyses[analysis_id] = {
+                'metadata': metadata,
+                'test_matrix': test_matrix,
+                'created_at': datetime.now()
+            }
+
+            await self._store_image_analysis(analysis_id, metadata)
+
+            # Add timeline event
+            await self._add_timeline_event(
+                "image_analyzed",
+                f"{metadata.image_type.upper()} image analyzed: {metadata.version}",
+                f"Image: {image_tag}",
+                related_id=analysis_id,
+                metadata={
+                    "image_tag": image_tag,
+                    "image_type": metadata.image_type,
+                    "version": metadata.version
+                }
+            )
+
+            return web.json_response({
+                "analysis_id": analysis_id,
+                "image_tag": image_tag,
+                "image_type": metadata.image_type,
+                "version": metadata.version,
+                "build_number": metadata.build_number,
+                "commit_hash": metadata.commit_hash,
+                "jira_tickets": metadata.jira_tickets,
+                "release_notes_count": len(metadata.release_notes),
+                "test_matrix": test_matrix,
+                "compatibility_info": metadata.compatibility_info,
+                "analyzed_at": datetime.now().isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to analyze image tag: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def validate_image(self, request):
+        """Validate image for deployment readiness"""
+        try:
+            data = await request.json()
+            image_tag = data.get('image_tag')
+            analysis_id = data.get('analysis_id')
+
+            # Get metadata from analysis or parse fresh
+            if analysis_id and analysis_id in self.active_image_analyses:
+                metadata = self.active_image_analyses[analysis_id]['metadata']
+            elif image_tag:
+                metadata = self.image_extractor.parse_image_tag(image_tag)
+                metadata = await self.image_extractor.enrich_metadata(metadata)
+            else:
+                return web.json_response({"error": "image_tag or analysis_id required"}, status=400)
+
+            # Validate image
+            validation_report = await self.image_validator.validate_image(metadata)
+
+            # Store validation results
+            validation_id = f"img_validation_{metadata.image_type}_{int(datetime.now().timestamp())}"
+            await self._store_image_validation_results(validation_id, validation_report)
+
+            # Add timeline event
+            await self._add_timeline_event(
+                "image_validated",
+                f"Image validation: {validation_report.overall_status.upper()}",
+                f"Image: {metadata.image_tag}, Ready: {validation_report.deployment_ready}",
+                related_id=validation_id,
+                metadata={
+                    "image_tag": metadata.image_tag,
+                    "overall_status": validation_report.overall_status,
+                    "deployment_ready": validation_report.deployment_ready
+                }
+            )
+
+            return web.json_response({
+                "validation_id": validation_id,
+                "image_tag": metadata.image_tag,
+                "overall_status": validation_report.overall_status,
+                "deployment_ready": validation_report.deployment_ready,
+                "validations_passed": len([v for v in validation_report.validations if v.is_valid]),
+                "validations_total": len(validation_report.validations),
+                "blocking_issues": validation_report.blocking_issues,
+                "warnings": validation_report.warnings,
+                "recommendations": validation_report.recommendations,
+                "validated_at": datetime.now().isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to validate image: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def get_deployment_recommendation(self, request):
+        """Get deployment recommendation based on risk analysis"""
+        try:
+            data = await request.json()
+            image_tag = data.get('image_tag')
+            analysis_id = data.get('analysis_id')
+            previous_image_tag = data.get('previous_image_tag')
+
+            # Get metadata
+            if analysis_id and analysis_id in self.active_image_analyses:
+                metadata = self.active_image_analyses[analysis_id]['metadata']
+            elif image_tag:
+                metadata = self.image_extractor.parse_image_tag(image_tag)
+                metadata = await self.image_extractor.enrich_metadata(metadata)
+            else:
+                return web.json_response({"error": "image_tag or analysis_id required"}, status=400)
+
+            # Get previous metadata if provided
+            previous_metadata = None
+            if previous_image_tag:
+                previous_metadata = self.image_extractor.parse_image_tag(previous_image_tag)
+                previous_metadata = await self.image_extractor.enrich_metadata(previous_metadata)
+
+            # Analyze release
+            risk_assessment, deployment_recommendation = await self.release_analyzer.analyze_release(
+                metadata, previous_metadata
+            )
+
+            # Generate analysis report
+            analysis_report = self.release_analyzer.generate_analysis_report(
+                risk_assessment, deployment_recommendation, metadata
+            )
+
+            return web.json_response({
+                "image_tag": metadata.image_tag,
+                "risk_assessment": {
+                    "risk_level": risk_assessment.risk_level,
+                    "confidence_score": risk_assessment.confidence_score,
+                    "risk_factors": risk_assessment.risk_factors,
+                    "recommendations": risk_assessment.recommendations,
+                    "required_tests": risk_assessment.required_tests,
+                    "rollback_plan": risk_assessment.rollback_plan
+                },
+                "deployment_recommendation": {
+                    "should_deploy": deployment_recommendation.should_deploy,
+                    "deployment_strategy": deployment_recommendation.deployment_strategy,
+                    "required_approvals": deployment_recommendation.required_approvals,
+                    "monitoring_requirements": deployment_recommendation.monitoring_requirements,
+                    "success_criteria": deployment_recommendation.success_criteria,
+                    "rollback_triggers": deployment_recommendation.rollback_triggers
+                },
+                "analysis_report": analysis_report,
+                "generated_at": datetime.now().isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to get deployment recommendation: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def get_image_analysis_report(self, request):
+        """Get complete image analysis report"""
+        try:
+            analysis_id = request.match_info['analysis_id']
+
+            if analysis_id not in self.active_image_analyses:
+                # Try to load from database
+                analysis_data = await self._load_image_analysis(analysis_id)
+                if not analysis_data:
+                    return web.json_response({"error": "Analysis not found"}, status=404)
+            else:
+                analysis_data = self.active_image_analyses[analysis_id]
+
+            metadata = analysis_data['metadata']
+            test_matrix = analysis_data.get('test_matrix', {})
+
+            # Generate comprehensive report
+            deployment_summary = self.image_extractor.to_deployment_summary(metadata)
+
+            return web.json_response({
+                "analysis_id": analysis_id,
+                "image_tag": metadata.image_tag,
+                "image_type": metadata.image_type,
+                "version": metadata.version,
+                "build_number": metadata.build_number,
+                "branch": metadata.branch,
+                "commit_hash": metadata.commit_hash,
+                "build_date": metadata.build_date.isoformat() if metadata.build_date else None,
+                "jira_tickets": metadata.jira_tickets,
+                "release_notes": metadata.release_notes,
+                "compatibility_info": metadata.compatibility_info,
+                "performance_metrics": metadata.performance_metrics,
+                "test_matrix": test_matrix,
+                "deployment_summary": deployment_summary,
+                "created_at": analysis_data['created_at'].isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to get image analysis report: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def deploy_image_with_tests(self, request):
+        """Deploy image with automated test execution"""
+        try:
+            data = await request.json()
+            image_tag = data.get('image_tag')
+            analysis_id = data.get('analysis_id')
+            cluster_name = data.get('cluster', 'qa-enterprise-use2')
+            jira_key = data.get('jira_key')
+            manifest = data.get('manifest')
+
+            # Get metadata
+            if analysis_id and analysis_id in self.active_image_analyses:
+                metadata = self.active_image_analyses[analysis_id]['metadata']
+            elif image_tag:
+                metadata = self.image_extractor.parse_image_tag(image_tag)
+                metadata = await self.image_extractor.enrich_metadata(metadata)
+            else:
+                return web.json_response({"error": "image_tag or analysis_id required"}, status=400)
+
+            if not manifest:
+                return web.json_response({"error": "manifest is required for deployment"}, status=400)
+
+            # Validate image first
+            validation_report = await self.image_validator.validate_image(metadata)
+
+            if not validation_report.deployment_ready:
+                return web.json_response({
+                    "error": "Image not ready for deployment",
+                    "blocking_issues": validation_report.blocking_issues,
+                    "deployment_ready": False
+                }, status=400)
+
+            try:
+                cluster = Cluster(cluster_name)
+            except ValueError:
+                return web.json_response({"error": f"Invalid cluster: {cluster_name}"}, status=400)
+
+            # Determine test suites based on image type
+            if metadata.image_type == 'qli':
+                # QLI-focused test suites
+                test_suites = ['tavern_api_qli', 'selenium_qli_sanity']
+            else:  # parser
+                # Parser-focused test suites
+                test_suites = ['parser_accuracy', 'parser_performance']
+
+            # Trigger appropriate test suites
+            test_results = {}
+            for suite_id in test_suites:
+                try:
+                    test_run = await self.regression_skill.trigger_single_suite(
+                        suite_id=suite_id,
+                        manifest=manifest,
+                        cluster=cluster,
+                        jira_key=jira_key or f"{metadata.image_type.upper()}-{metadata.version}"
+                    )
+                    test_results[suite_id] = test_run
+                    await self._store_test_run(test_run)
+                    self.active_test_runs[test_run.id] = test_run
+                except Exception as e:
+                    logger.warning(f"Failed to trigger {suite_id}: {e}")
+
+            # Create deployment record
+            deployment_id = f"deployment_{metadata.image_type}_{int(datetime.now().timestamp())}"
+
+            # Add comprehensive timeline event
+            await self._add_timeline_event(
+                "image_deployment_initiated",
+                f"{metadata.image_type.upper()} image deployment started",
+                f"Image: {metadata.image_tag}, Tests: {len(test_results)} suites triggered",
+                related_id=deployment_id,
+                metadata={
+                    "image_tag": metadata.image_tag,
+                    "image_type": metadata.image_type,
+                    "version": metadata.version,
+                    "manifest": manifest,
+                    "cluster": cluster_name,
+                    "test_suites": list(test_results.keys())
+                }
+            )
+
+            # Broadcast deployment update
+            await self._broadcast_update({
+                "type": "image_deployment_started",
+                "deployment_id": deployment_id,
+                "image_tag": metadata.image_tag,
+                "test_count": len(test_results)
+            })
+
+            return web.json_response({
+                "deployment_id": deployment_id,
+                "image_tag": metadata.image_tag,
+                "status": "deployment_initiated",
+                "manifest": manifest,
+                "cluster": cluster_name,
+                "test_results": {
+                    suite_id: {
+                        "id": run.id,
+                        "status": run.status.value,
+                        "url": run.url
+                    }
+                    for suite_id, run in test_results.items()
+                },
+                "validation_passed": True,
+                "started_at": datetime.now().isoformat()
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to deploy image with tests: {e}")
+            return web.json_response({"error": str(e)}, status=500)
 
     # WebSocket Handler
 
@@ -927,11 +1307,15 @@ class EMTDashboard:
                     "database": db_status,
                     "regression_skill": "active",
                     "atlassian_skill": "active",
+                    "image_extractor": "active",
+                    "release_analyzer": "active",
+                    "image_validator": "active",
                     "websockets": {"active_connections": len(self.websockets)}
                 },
                 "metrics": {
                     "active_test_runs": len(self.active_test_runs),
                     "active_analyses": len(self.active_analyses),
+                    "active_image_analyses": len(self.active_image_analyses),
                     "uptime": "runtime_calculation_needed"
                 },
                 "timestamp": datetime.now().isoformat()
@@ -944,6 +1328,74 @@ class EMTDashboard:
             }, status=500)
 
     # Helper Methods
+
+    async def _store_image_analysis(self, analysis_id: str, metadata: ImageMetadata):
+        """Store image analysis in database"""
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT OR REPLACE INTO image_analyses
+            (id, image_tag, image_type, version, build_number, commit_hash, jira_tickets,
+             release_notes, risk_level, risk_factors, recommendations, deployment_ready,
+             validation_status, blocking_issues, confidence_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            analysis_id, metadata.image_tag, metadata.image_type, metadata.version,
+            metadata.build_number, metadata.commit_hash, json.dumps(metadata.jira_tickets),
+            json.dumps(metadata.release_notes), "unknown", json.dumps([]),
+            json.dumps([]), False, "pending", json.dumps([]), 0.0
+        ))
+
+        conn.commit()
+        conn.close()
+
+    async def _store_image_validation_results(self, validation_id: str, validation_report):
+        """Store image validation results"""
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        for validation in validation_report.validations:
+            cursor.execute("""
+                INSERT INTO image_validations (id, image_tag, validation_type, is_valid, message, details)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                f"{validation_id}_{validation.validation_type}",
+                validation_report.image_tag,
+                validation.validation_type,
+                validation.is_valid,
+                validation.message,
+                json.dumps(validation.details or {})
+            ))
+
+        conn.commit()
+        conn.close()
+
+    async def _load_image_analysis(self, analysis_id: str):
+        """Load image analysis from database"""
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM image_analyses WHERE id = ?", (analysis_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        # Reconstruct metadata object (simplified)
+        return {
+            'metadata': {
+                'image_tag': row[1],
+                'image_type': row[2],
+                'version': row[3],
+                'build_number': row[4],
+                'commit_hash': row[5],
+                'jira_tickets': json.loads(row[6]),
+                'release_notes': json.loads(row[7])
+            },
+            'created_at': datetime.fromisoformat(row[15])
+        }
 
     async def _store_test_run(self, test_run: TestRun):
         """Store test run in database"""
@@ -1099,6 +1551,7 @@ class EMTDashboard:
         return {
             "active_test_runs": len(self.active_test_runs),
             "active_analyses": len(self.active_analyses),
+            "active_image_analyses": len(self.active_image_analyses),
             "websocket_clients": len(self.websockets),
             "timestamp": datetime.now().isoformat()
         }
@@ -1106,7 +1559,7 @@ class EMTDashboard:
     def run(self, host='0.0.0.0', port=8080, debug=False):
         """Run the dashboard application"""
         logger.info(f"Starting EMT Dashboard on {host}:{port}")
-        logger.info("Skills loaded: Regression Testing + Atlassian Context Enricher")
+        logger.info("Skills loaded: Regression Testing + Atlassian Context Enricher + QLI/Parser Image Analysis")
 
         # Start background tasks
         async def start_background_tasks():

@@ -1,0 +1,311 @@
+# Configuration for Release Notes from Image Tags
+# QLI & Parser Image Analysis System
+
+# Docker registry configuration
+docker_registries:
+  - name: "alation-internal"
+    url: "registry.alation.com"
+    type: "private"
+    authentication_required: true
+
+  - name: "docker-hub"
+    url: "docker.io"
+    type: "public"
+    authentication_required: false
+
+# Image repositories configuration
+repositories:
+  qli:
+    registry: "alation-internal"
+    namespace: "alation"
+    image_names:
+      - "query-log-ingestion"
+      - "alation-qli"
+      - "qli-service"
+
+    git_repository:
+      url: "git@github.com:Alation/alation-qli.git"
+      branch: "main"
+      changelog_path: "CHANGELOG.md"
+
+    jira_integration:
+      project_key: "QLI"
+      component: "query-log-ingestion"
+      issue_types: ["Bug", "Story", "Task", "Epic"]
+
+    testing:
+      test_suites: ["unit", "integration", "performance", "regression"]
+      required_databases: ["snowflake", "databricks", "bigquery", "redshift"]
+      performance_benchmarks:
+        ingestion_rate_min: 5000  # queries/minute
+        memory_limit_max: 4096    # MB
+        startup_time_max: 60      # seconds
+
+  parser:
+    registry: "alation-internal"
+    namespace: "alation"
+    image_names:
+      - "gsp-parser"
+      - "alation-parser"
+      - "sql-parser"
+
+    git_repository:
+      url: "git@github.com:Alation/alation-parser.git"
+      branch: "main"
+      changelog_path: "RELEASE_NOTES.md"
+
+    jira_integration:
+      project_key: "AL"
+      component: "parser"
+      issue_types: ["Bug", "Story", "Task", "Improvement"]
+
+    testing:
+      test_suites: ["unit", "integration", "accuracy", "performance"]
+      required_databases: ["postgresql", "mysql", "oracle", "sqlserver", "db2"]
+      accuracy_requirements:
+        min_accuracy: 0.999       # 99.9%
+        test_query_count: 10000
+        complexity_levels: ["simple", "medium", "complex", "nested"]
+
+# Image tag patterns for parsing
+tag_patterns:
+  qli:
+    - pattern: "qli-(?P<version>[\\d\\.]+)-(?P<build>\\d+)-(?P<hash>[a-f0-9]{7,})"
+      description: "Standard QLI build format"
+      example: "qli-2.1.0-1234-a1b2c3d"
+
+    - pattern: "alation-qli:(?P<version>[\\d\\.]+)-(?P<branch>[\\w\\-]+)-(?P<hash>[a-f0-9]{7,})"
+      description: "Branch-based QLI format"
+      example: "alation-qli:2.1.0-feature-branch-a1b2c3d"
+
+    - pattern: "query-log-ingestion:(?P<version>[\\d\\.]+)\\.(?P<build>\\d+)"
+      description: "Simple version format"
+      example: "query-log-ingestion:2.1.0.1234"
+
+  parser:
+    - pattern: "parser-(?P<version>[\\d\\.]+)-(?P<build>\\d+)-(?P<hash>[a-f0-9]{7,})"
+      description: "Standard parser build format"
+      example: "parser-3.2.1-5678-d4e5f6g"
+
+    - pattern: "alation-parser:(?P<version>[\\d\\.]+)-(?P<branch>[\\w\\-]+)-(?P<hash>[a-f0-9]{7,})"
+      description: "Branch-based parser format"
+      example: "alation-parser:3.2.1-bugfix-branch-d4e5f6g"
+
+    - pattern: "gsp-parser:(?P<version>[\\d\\.]+)\\.(?P<build>\\d+)"
+      description: "GSP parser format"
+      example: "gsp-parser:3.2.1.5678"
+
+# Release note extraction configuration
+release_notes:
+  sources:
+    - type: "git_commits"
+      enabled: true
+      commit_range: 100  # Number of commits to analyze
+      exclude_patterns: ["Merge pull request", "Merge branch", "Revert"]
+
+    - type: "jira_tickets"
+      enabled: true
+      fields: ["summary", "description", "customfield_10001"]  # Release notes field
+      statuses: ["Done", "Closed", "Released"]
+
+    - type: "changelog_file"
+      enabled: true
+      formats: ["markdown", "rst", "txt"]
+      version_markers: ["##", "Version", "Release"]
+
+    - type: "pull_request_descriptions"
+      enabled: true
+      platforms: ["github", "gitlab"]
+      merge_status: ["merged"]
+
+  processing:
+    # Automatically extract and categorize release notes
+    categorization:
+      enabled: true
+      categories:
+        - name: "Features"
+          keywords: ["add", "new", "feature", "implement", "introduce"]
+        - name: "Bug Fixes"
+          keywords: ["fix", "bug", "issue", "resolve", "correct"]
+        - name: "Improvements"
+          keywords: ["improve", "enhance", "optimize", "refactor", "update"]
+        - name: "Breaking Changes"
+          keywords: ["break", "incompatible", "remove", "deprecate", "change"]
+        - name: "Security"
+          keywords: ["security", "vulnerability", "cve", "patch"]
+
+    # Filter and clean release notes
+    filtering:
+      min_length: 10          # Minimum characters for a note
+      exclude_merge_commits: true
+      exclude_version_bumps: true
+      deduplicate: true
+
+# Validation configuration
+validation:
+  security:
+    enabled: true
+    scanners:
+      - name: "trivy"
+        critical_fail: true
+        high_fail: true
+        medium_warn: true
+      - name: "clair"
+        backup_scanner: true
+
+    vulnerability_sources:
+      - "nvd"
+      - "github_security"
+      - "alation_internal"
+
+  functionality:
+    enabled: true
+    test_timeout: 300  # 5 minutes
+
+    qli_tests:
+      - name: "ingestion_smoke_test"
+        timeout: 60
+        required: true
+      - name: "connector_compatibility"
+        timeout: 120
+        required: true
+      - name: "performance_baseline"
+        timeout: 180
+        required: false
+
+    parser_tests:
+      - name: "parsing_accuracy_test"
+        timeout: 120
+        required: true
+      - name: "dialect_compatibility"
+        timeout: 90
+        required: true
+      - name: "performance_baseline"
+        timeout: 180
+        required: false
+
+  deployment_readiness:
+    checks:
+      - name: "metadata_completeness"
+        required: true
+      - name: "compatibility_info"
+        required: true
+      - name: "release_notes_available"
+        required: false
+        warning_only: true
+      - name: "jira_tickets_linked"
+        required: false
+        warning_only: true
+
+# Integration with dashboard
+dashboard_integration:
+  enabled: true
+
+  api_endpoints:
+    - path: "/api/images/analyze"
+      method: "POST"
+      description: "Analyze image tag and extract metadata"
+
+    - path: "/api/images/validate"
+      method: "POST"
+      description: "Validate image for deployment readiness"
+
+    - path: "/api/images/recommendations"
+      method: "POST"
+      description: "Get deployment recommendations"
+
+  ui_integration:
+    tabs:
+      - name: "Image Analysis"
+        enabled: true
+        features: ["tag_parsing", "metadata_extraction", "release_notes"]
+
+      - name: "Validation"
+        enabled: true
+        features: ["security_scan", "functionality_test", "deployment_check"]
+
+      - name: "Deployment"
+        enabled: true
+        features: ["risk_assessment", "recommendations", "approval_workflow"]
+
+  notifications:
+    channels:
+      - type: "slack"
+        webhook_url: "${SLACK_WEBHOOK_URL}"
+        events: ["validation_failed", "deployment_ready", "security_alert"]
+
+      - type: "email"
+        smtp_server: "smtp.alation.com"
+        events: ["critical_issues", "deployment_approval"]
+
+      - type: "jira"
+        create_tickets: true
+        events: ["validation_failed", "security_vulnerabilities"]
+
+# Performance and caching
+performance:
+  caching:
+    enabled: true
+    ttl: 3600  # 1 hour
+    redis_url: "${REDIS_URL:-redis://localhost:6379}"
+
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+    burst_size: 10
+
+  async_processing:
+    enabled: true
+    worker_count: 4
+    queue_size: 100
+
+# Logging and monitoring
+logging:
+  level: "INFO"
+  format: "json"
+  file: "logs/image-analysis.log"
+
+  loggers:
+    - name: "extractor"
+      level: "DEBUG"
+    - name: "analyzer"
+      level: "INFO"
+    - name: "validator"
+      level: "INFO"
+
+monitoring:
+  metrics:
+    enabled: true
+    endpoint: "/metrics"
+
+  health_checks:
+    - name: "git_connectivity"
+      interval: 60
+    - name: "jira_api"
+      interval: 300
+    - name: "docker_registry"
+      interval: 120
+
+# Environment-specific overrides
+environments:
+  development:
+    validation:
+      security:
+        scanners: []  # Disable security scans in dev
+    logging:
+      level: "DEBUG"
+
+  staging:
+    validation:
+      security:
+        high_fail: false  # Allow high vulnerabilities in staging
+
+  production:
+    validation:
+      security:
+        critical_fail: true
+        high_fail: true
+    notifications:
+      channels:
+        - type: "pagerduty"
+          events: ["critical_issues", "deployment_failures"]
